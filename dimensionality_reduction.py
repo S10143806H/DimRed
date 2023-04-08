@@ -1,103 +1,134 @@
-# Import necessary package sklearn
-import numpy as np
+# Install dependences
 import pandas as pd
-
-from sklearn.datasets import make_classification
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
-from sklearn.metrics import accuracy_score
-from scipy.spatial.distance import mahalanobis
+import numpy as np
 import matplotlib.pyplot as plt
-import time
+from sklearn.datasets import fetch_lfw_people
 
-# Load high-dimensional dataset
-# url = "http://archive.ics.uci.edu/ml/machine-learning-databases/optdigits/optdigits.tra"
-url = "http://archive.ics.uci.edu/ml/machine-learning-databases/arcene/ARCENE/arcene_test.data"
-data = pd.read_csv(url, header=None)
-print(data)
-
-
-# Preprocessing and normalization
-X = data.iloc[:, :-1].values  # iloc integer-location based indexing
-y = data.iloc[:, -1].values
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-
-# Split the dataset into training and testing datasets
-X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y, test_size=0.2, random_state=42)
-
-# Train logistic regression model on original dataset
-start_time = time.time()
-lr = LogisticRegression(random_state=42)
-lr.fit(X_train, y_train)
-y_pred = lr.predict(X_test)
-original_accuracy = accuracy_score(y_test, y_pred)
-original_time = time.time() - start_time
-
-# Apply PCA for dimensionality reduction
-pca = PCA(n_components=100)
-X_train_pca = pca.fit_transform(X_train)
-X_test_pca = pca.transform(X_test)
-
-# Apply LDA for Dimensionality Reduction
-lda = LDA(n_components=9)
-X_train_lda = lda.fit_transform(X_train, y_train)
-X_test_lda = lda.transform(X_test)
-
-# Mahalanobis distance classifier
+from sklearn.decomposition import PCA
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
+from sklearn.model_selection import train_test_split
+from scipy.spatial.distance import mahalanobis
+from sklearn.preprocessing import StandardScaler
 
 
-def mahalanobis_classifier(X_train, X_test, y_train):
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score
+
+
+def mahalanobis_classifier(X_train, y_train, X_test, y_test):
     unique_labels = np.unique(y_train)
+    cov_matrices = {}
     means = {}
-    cov_inv = np.linalg.inv(np.cov(X_train.T))
+    cov_inv = {}
 
+    # Calculate the covariance matrices and means for each class
     for label in unique_labels:
-        means[label] = np.mean(X_train[y_train == label], axis=0)
+        data = X_train[y_train == label]
+        cov_matrices[label] = np.cov(data.T)
+        means[label] = np.mean(data, axis=0)
+        cov_inv[label] = np.linalg.pinv(cov_matrices[label])
 
-    predictions = []
+    # Perform classification using minimum Mahalanobis distance
+    y_pred = []
     for x in X_test:
-        distances = {label: mahalanobis(
-            x, means[label], cov_inv) for label in unique_labels}
-        min_distance_label = min(distances, key=distances.get)
-        predictions.append(min_distance_label)
+        distances = []
+        for label in unique_labels:
+            distance = mahalanobis(x, means[label], cov_inv[label])
+            distances.append(distance)
+        y_pred.append(unique_labels[np.argmin(distances)])
 
-    return predictions
+    return np.array(y_pred)
 
 
-# # Classification and accuracy computation
-# start_time = time.time()
+# Pre processing
+lfw_people = fetch_lfw_people(min_faces_per_person=20, resize=0.5)
 
-# lr_pca = LogisticRegression(random_state=42)
-# lr_pca.fit(X_train_pca, y_train)
+# Normalization
+X = lfw_people.data
+y = lfw_people.target
+n_classes = lfw_people.target_names.shape[0]
+component = 30
 
-# y_pred_pca = mahalanobis_classifier(X_train_pca, X_test_pca, y_train)
-# accuracy_pca = accuracy_score(y_test, y_pred_pca)
-# pca_time = time.time() - start_time
 
-# y_pred_lda = mahalanobis_classifier(X_train_lda, X_test_lda, y_train)
-# accuracy_lda = accuracy_score(y_test, y_pred_lda)
-# lda_time = time.time() - start_time
+print(X.shape)
+print(y.shape)
 
-# # Print results
-# print("Original Accuracy: {:.3f}%".format(original_accuracy*100))
-# print(f"PCA Accuracy: {accuracy_pca:.3f}")
-# print(f"LDA Accuracy: {accuracy_lda:.3f}")
+print("Number of features:", X.shape[1])            # 5655
+print("Number of datasets (samples):", y.shape[0])  # 4061
+print("Number of classes: ", n_classes)
 
-# print("Original time: {:.2f}s".format(original_time))
-# print("PCA time: {:.2f}s".format(pca_time))
-# print("LDA time: {:.2f}s".format(lda_time))
+# Split training set and test set
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=None)
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
 
-# # Visualize the comparison of PCA and LDA results
-# labels = ['PCA', 'LDA']
-# accuracies = [accuracy_pca, accuracy_lda]
+print(X_train.shape)
+print(X_test.shape)
+print(y_train.shape)
+print(y_test.shape)
 
-# plt.bar(labels, accuracies)
-# plt.xlabel('Dimensionality Reduction Techniques')
-# plt.ylabel('Accuracy')
-# plt.title('Accuracy Comparison of PCA and LDA')
-# plt.show()
+# Apply PCA
+error_rates_pca = []
+error_rates_pca_model = []
+for n_components_pca in range(component, 1, -1):
+    pca = PCA(n_components=n_components_pca, whiten=True)
+    X_train_pca = pca.fit_transform(X_train)
+    X_test_pca = pca.transform(X_test)
+    y_pred_pca = mahalanobis_classifier(
+        X_train_pca, y_train, X_test_pca, y_test)
+    error_rate_pca = 1 - np.sum(y_pred_pca == y_test) / len(y_test)
+    error_rates_pca.append(error_rate_pca)
+    print(
+        f"PCA Error Rate with {n_components_pca} components:", error_rate_pca)
+
+    # Train and evaluate model on PCA-reduced data
+    clf_pca = SVC(kernel='linear', C=1)
+    clf_pca.fit(X_train_pca, y_train)
+    y_pred_pca = clf_pca.predict(X_test_pca)
+    accuracy_pca = accuracy_score(y_test, y_pred_pca)
+    error_rate_pca_model = 1 - accuracy_pca
+    error_rates_pca_model.append(error_rate_pca_model)
+    print(
+        f"PCA Model Error Rate with {n_components_pca} components:", error_rate_pca_model)
+
+
+# Apply LDA
+error_rates_lda = []
+error_rates_lda_model = []
+for n_components_lda in range(component, 1, -1):
+    lda = LDA(n_components=n_components_lda)
+    X_train_lda = lda.fit_transform(X_train, y_train)
+    X_test_lda = lda.transform(X_test)
+    y_pred_lda = mahalanobis_classifier(
+        X_train_lda, y_train, X_test_lda, y_test)
+    error_rate_lda = 1 - np.sum(y_pred_lda == y_test) / len(y_test)
+    error_rates_lda.append(error_rate_lda)
+    print(
+        f"LDA Error Rate with {n_components_lda} components:", error_rate_lda)
+
+    # Train and evaluate model on LDA-reduced data
+    clf_lda = SVC(kernel='linear', C=1)
+    clf_lda.fit(X_train_lda, y_train)
+    y_pred_lda = clf_lda.predict(X_test_lda)
+    accuracy_lda = accuracy_score(y_test, y_pred_lda)
+    error_rate_lda_model = 1 - accuracy_lda
+    error_rates_lda_model.append(error_rate_lda_model)
+    print(
+        f"LDA Model Error Rate with {n_components_lda} components:", error_rate_lda_model)
+
+# Plot the accuracies
+plt.plot(range(component, 1, -1), error_rates_pca, marker='x', label='PCA')
+plt.plot(range(component, 1, -1), error_rates_pca_model,
+         marker='x', label='PCA_Model')
+plt.plot(range(component, 1, -1), error_rates_lda, marker='o', label='LDA')
+plt.plot(range(component, 1, -1), error_rates_lda_model,
+         marker='o', label='LDA_Model')
+plt.xlabel('Number of Components (Descending)')
+plt.ylabel('Error Rate')
+plt.title('Error Rate vs. Number of Components')
+plt.legend()
+plt.grid()
+plt.gca().invert_xaxis()
+plt.show()
